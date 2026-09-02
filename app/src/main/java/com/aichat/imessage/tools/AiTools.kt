@@ -14,9 +14,13 @@ package com.aichat.imessage.tools
  *   [[ACCION:ENVIAR_MENSAJE|app|contacto_o_numero|mensaje]]
  *   [[ACCION:CREAR_ALARMA|hora|minuto|mensaje]]
  *   [[ACCION:CREAR_TEMPORIZADOR|segundos|mensaje]]
- *
- * parseAiActions() los extrae, los ejecuta la app, y el texto que ve el
- * usuario queda limpio de esos comandos.
+ *   [[ACCION:LLAMAR|numero_o_contacto]]
+ *   [[ACCION:FLASHLIGHT|on_o_off]]
+ *   [[ACCION:MUTE|on_o_off]]
+ *   [[ACCION:NOTAS|guardar|texto]]
+ *   [[ACCION:LEER_CONTACTO|nombre]]
+ *   [[ACCION:BUSCAR_ARCHIVO|nombre_de_archivo]]
+ *   [[ACCION:MODO_MANOS_LIBRES|on_o_off]]
  */
 enum class AiActionType {
     PERMISO,
@@ -28,7 +32,14 @@ enum class AiActionType {
     ENVIAR_SMS,
     ENVIAR_MENSAJE,
     CREAR_ALARMA,
-    CREAR_TEMPORIZADOR
+    CREAR_TEMPORIZADOR,
+    LLAMAR,
+    FLASHLIGHT,
+    MUTE,
+    NOTAS,
+    LEER_CONTACTO,
+    BUSCAR_ARCHIVO,
+    MODO_MANOS_LIBRES
 }
 
 data class AiAction(val type: AiActionType, val args: List<String>)

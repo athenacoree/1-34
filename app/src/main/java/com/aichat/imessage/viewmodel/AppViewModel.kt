@@ -2,8 +2,11 @@ package com.aichat.imessage.viewmodel
 
 import android.Manifest
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraManager
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -29,7 +32,9 @@ import com.aichat.imessage.tools.AiPermissionKey
 import com.aichat.imessage.tools.AppLauncherHelper
 import com.aichat.imessage.tools.CommunicationHelper
 import com.aichat.imessage.tools.PermissionRequest
+import com.aichat.imessage.tools.PremiumVoiceTtsHelper
 import com.aichat.imessage.tools.SystemTaskHelper
+import com.aichat.imessage.tools.VoskVoiceHelper
 import com.aichat.imessage.tools.YouTubeHelper
 import com.aichat.imessage.tools.ZipUtil
 import com.aichat.imessage.tools.parseAiActions
@@ -73,13 +78,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ---- Control de generación de IA y cancelación ("Detener Búsqueda") ----
     private var aiJob: Job? = null
 
-    // ---- Control de voz (Speech-to-Text) ----
+    // ---- Control de voz y manos libres (STT + TTS Premium Femenina) ----
     private var speechRecognizer: SpeechRecognizer? = null
     private val _isListening = MutableStateFlow(false)
     val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
 
     private val _spokenText = MutableStateFlow("")
     val spokenText: StateFlow<String> = _spokenText.asStateFlow()
+
+    private val _handsFreeMode = MutableStateFlow(false)
+    val handsFreeMode: StateFlow<Boolean> = _handsFreeMode.asStateFlow()
+
+    // Configuración de la voz femenina premium
+    var voicePitch = 1.15f
+    var voiceSpeed = 0.98f
 
     // ---- Herramientas de la IA: permisos, adjuntos, zip, YouTube ----
 
@@ -99,6 +111,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingPermissionLabel: String? = null
 
     init {
+        PremiumVoiceTtsHelper.init(application)
         if (_settings.value.apiKey.isBlank()) {
             showToast("Configura tu clave de OpenRouter para empezar", true)
         }
@@ -156,12 +169,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun cancelAiRequest() {
         aiJob?.cancel()
         aiJob = null
+        PremiumVoiceTtsHelper.stop()
         val id = _activeId.value ?: return
         updateConversation(id) { c -> c.pending = false }
         showToast("Búsqueda/Respuesta detenida", true)
     }
 
-    // ---- Dictado por Voz Continuo ----
+    // ---- Dictado por Voz ----
     fun startVoiceRecognition() {
         val context = getApplication<Application>()
 
@@ -175,13 +189,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            showToast("El reconocimiento de voz no está disponible en este dispositivo", false)
-            return
-        }
-
         stopVoiceRecognition()
 
+        VoskVoiceHelper.startListening(
+            context = context,
+            onResult = { text ->
+                if (text.isNotBlank()) {
+                    _spokenText.value = text
+                }
+            },
+            onError = { _ ->
+                startNativeSpeechRecognizer(context)
+            }
+        )
+    }
+
+    private fun startNativeSpeechRecognizer(context: Context) {
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            showToast("Reconocimiento de voz no disponible", false)
+            return
+        }
         try {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
                 setRecognitionListener(object : RecognitionListener {
@@ -192,7 +219,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     override fun onEndOfSpeech() { _isListening.value = false }
                     override fun onError(error: Int) {
                         _isListening.value = false
-                        showToast("No se pudo entender la voz", false)
                     }
                     override fun onResults(results: Bundle?) {
                         _isListening.value = false
@@ -212,7 +238,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     override fun onEvent(eventType: Int, params: Bundle?) {}
                 })
             }
-
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
@@ -221,11 +246,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
             _isListening.value = false
-            showToast("Error al iniciar el micrófono: ${e.message}", false)
         }
     }
 
     fun stopVoiceRecognition() {
+        VoskVoiceHelper.stopListening()
         runCatching {
             speechRecognizer?.stopListening()
             speechRecognizer?.destroy()
@@ -236,6 +261,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun consumeSpokenText() {
         _spokenText.value = ""
+    }
+
+    fun toggleHandsFreeMode() {
+        _handsFreeMode.value = !_handsFreeMode.value
+        showToast(if (_handsFreeMode.value) "Modo manos libres activado" else "Modo manos libres desactivado", true)
     }
 
     fun sendMessage(text: String) {
@@ -281,6 +311,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     updateConversation(id) { c -> c.messages.add(saved) }
+                    PremiumVoiceTtsHelper.speak(parsed.displayText, pitch = voicePitch, speed = voiceSpeed)
                 }
                 if (parsed.actions.isNotEmpty()) {
                     executeAiActions(id, parsed.actions)
@@ -441,6 +472,81 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         addToolLogMessage(conversationId, "⚠️ No pude iniciar el temporizador.")
                     }
                 }
+
+                AiActionType.LLAMAR -> {
+                    val number = action.args.getOrNull(0).orEmpty()
+                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${number.trim()}")).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching {
+                        context.startActivity(intent)
+                        addToolLogMessage(conversationId, "📞 Abrí el marcador de llamadas para: $number.")
+                    }.onFailure {
+                        addToolLogMessage(conversationId, "⚠️ No se pudo abrir el marcador de llamadas.")
+                    }
+                }
+
+                AiActionType.FLASHLIGHT -> {
+                    val state = action.args.getOrNull(0)?.lowercase() ?: "on"
+                    val turnOn = state == "on" || state == "encender"
+                    try {
+                        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                        val cameraId = cameraManager.cameraIdList.firstOrNull()
+                        if (cameraId != null) {
+                            cameraManager.setTorchMode(cameraId, turnOn)
+                            addToolLogMessage(conversationId, if (turnOn) "🔦 Linterna encendida." else "🔦 Linterna apagada.")
+                        }
+                    } catch (e: Exception) {
+                        addToolLogMessage(conversationId, "⚠️ No se pudo controlar la linterna.")
+                    }
+                }
+
+                AiActionType.MUTE -> {
+                    val state = action.args.getOrNull(0)?.lowercase() ?: "on"
+                    val turnOn = state == "on" || state == "silencio"
+                    try {
+                        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        audioManager.ringerMode = if (turnOn) AudioManager.RINGER_MODE_SILENT else AudioManager.RINGER_MODE_NORMAL
+                        addToolLogMessage(conversationId, if (turnOn) "🔇 Modo silencio activado." else "🔊 Modo sonido normal activado.")
+                    } catch (e: SecurityException) {
+                        addToolLogMessage(conversationId, "⚠️ Se requiere permiso de No Molestar del sistema.")
+                    } catch (e: Exception) {
+                        addToolLogMessage(conversationId, "⚠️ No se pudo cambiar el modo de sonido.")
+                    }
+                }
+
+                AiActionType.NOTAS -> {
+                    val noteText = action.args.getOrNull(1) ?: action.args.getOrNull(0).orEmpty()
+                    if (noteText.isNotBlank()) {
+                        val notesDir = File(context.filesDir, "notes").apply { mkdirs() }
+                        val noteFile = File(notesDir, "nota_${System.currentTimeMillis()}.txt")
+                        noteFile.writeText(noteText)
+                        addToolLogMessage(conversationId, "📝 Nota guardada en memoria local: \"${noteText.take(30)}...\"")
+                    }
+                }
+
+                AiActionType.LEER_CONTACTO -> {
+                    val searchName = action.args.getOrNull(0).orEmpty()
+                    addToolLogMessage(conversationId, "📞 Búsqueda de contacto \"$searchName\" solicitada.")
+                }
+
+                AiActionType.BUSCAR_ARCHIVO -> {
+                    val fileName = action.args.getOrNull(0).orEmpty()
+                    val filesDir = context.filesDir
+                    val matches = filesDir.walkTopDown().filter { it.isFile && it.name.contains(fileName, ignoreCase = true) }.take(5).toList()
+                    if (matches.isNotEmpty()) {
+                        val fileList = matches.joinToString("\n") { "• ${it.name}" }
+                        addToolLogMessage(conversationId, "📁 Archivos encontrados:\n$fileList")
+                    } else {
+                        addToolLogMessage(conversationId, "📁 No se encontraron archivos locales con \"$fileName\".")
+                    }
+                }
+
+                AiActionType.MODO_MANOS_LIBRES -> {
+                    val state = action.args.getOrNull(0)?.lowercase() ?: "on"
+                    _handsFreeMode.value = state == "on" || state == "activar"
+                    addToolLogMessage(conversationId, if (_handsFreeMode.value) "🗣️ Modo manos libres activo." else "🗣️ Modo manos libres desactivado.")
+                }
             }
         }
     }
@@ -574,6 +680,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onShareFileConsumed() { _shareFile.value = null }
+
+    override fun onCleared() {
+        PremiumVoiceTtsHelper.shutdown()
+        super.onCleared()
+    }
 
     // ---- Utilidades internas ----
 

@@ -1,6 +1,13 @@
 package com.aichat.imessage.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,12 +32,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,7 +69,27 @@ import com.aichat.imessage.ui.theme.LocalAIChatColors
 import com.aichat.imessage.viewmodel.AppViewModel
 import java.io.File
 
-private fun openAttachment(context: android.content.Context, attachment: Attachment) {
+private fun triggerHapticFeedback(context: Context) {
+    try {
+        if (Build.VERSION.SDK_INT >= 31) {
+            val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vm.defaultVibrator.vibrate(VibrationEffect.createOneShot(35, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            val v = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            @Suppress("DEPRECATION")
+            v.vibrate(35)
+        }
+    } catch (e: Exception) {}
+}
+
+private fun copyToClipboard(context: Context, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clip = ClipData.newPlainText("Mensaje IA", text)
+    clipboard.setPrimaryClip(clip)
+}
+
+private fun openAttachment(context: Context, attachment: Attachment) {
     try {
         val file = File(attachment.localPath)
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
@@ -71,9 +99,7 @@ private fun openAttachment(context: android.content.Context, attachment: Attachm
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
-    } catch (e: Exception) {
-        // Silencioso
-    }
+    } catch (e: Exception) {}
 }
 
 @Composable
@@ -85,6 +111,7 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
 
     val isListening by viewModel.isListening.collectAsState()
     val spokenText by viewModel.spokenText.collectAsState()
+    val handsFreeMode by viewModel.handsFreeMode.collectAsState()
 
     if (conversation == null) {
         LaunchedEffect(Unit) { viewModel.closeChatPanel() }
@@ -119,13 +146,26 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
             }
             AvatarView(name = conversation.name, colorHex = conversation.avatarColor, fallback = colors.avatarBg, size = 32.dp)
             Spacer(Modifier.width(8.dp))
-            Text(
-                conversation.name,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 16.sp,
-                color = colors.text,
-                modifier = Modifier.weight(1f)
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    conversation.name,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    color = colors.text
+                )
+                Text(
+                    if (handsFreeMode) "Manos libres activo" else "En línea",
+                    fontSize = 11.sp,
+                    color = if (handsFreeMode) colors.accent else colors.textSecondary
+                )
+            }
+            IconButton(onClick = { viewModel.toggleHandsFreeMode() }) {
+                Icon(
+                    Icons.Filled.Headset,
+                    contentDescription = "Manos libres",
+                    tint = if (handsFreeMode) colors.accent else colors.textSecondary
+                )
+            }
             IconButton(onClick = { viewModel.exportConversation(conversation.id) }) {
                 Icon(Icons.Filled.IosShare, contentDescription = "Exportar chat", tint = colors.accent)
             }
@@ -174,14 +214,29 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
                         }
                         Spacer(Modifier.width(6.dp))
                     }
-                    MessageBubble(
-                        message = m,
-                        bubbleColor = if (m.role == "user") colors.bubbleSent else colors.bubbleReceived,
-                        textColor = if (m.role == "user") colors.bubbleSentText else colors.bubbleReceivedText,
-                        timeColor = colors.textSecondary,
-                        errorColor = colors.danger,
-                        onOpenAttachment = { att -> openAttachment(context, att) }
-                    )
+                    Column {
+                        MessageBubble(
+                            message = m,
+                            bubbleColor = if (m.role == "user") colors.bubbleSent else colors.bubbleReceived,
+                            textColor = if (m.role == "user") colors.bubbleSentText else colors.bubbleReceivedText,
+                            timeColor = colors.textSecondary,
+                            errorColor = colors.danger,
+                            onOpenAttachment = { att -> openAttachment(context, att) }
+                        )
+                        Row(modifier = Modifier.padding(top = 2.dp)) {
+                            Icon(
+                                Icons.Filled.ContentCopy,
+                                contentDescription = "Copiar",
+                                tint = colors.textSecondary,
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .clickable {
+                                        copyToClipboard(context, m.content)
+                                        viewModel.showToast("Mensaje copiado", true)
+                                    }
+                            )
+                        }
+                    }
                 }
             }
 
@@ -204,7 +259,7 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 TypingIndicator(dotColor = colors.textSecondary)
                                 Spacer(Modifier.width(8.dp))
-                                Text("Buscando / Pensando...", color = colors.textSecondary, fontSize = 12.sp)
+                                Text("Pensando...", color = colors.textSecondary, fontSize = 12.sp)
                             }
                         }
                     }
@@ -224,6 +279,7 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
             // Botón de Voz / Micrófono
             IconButton(
                 onClick = {
+                    triggerHapticFeedback(context)
                     if (isListening) {
                         viewModel.stopVoiceRecognition()
                     } else {
@@ -247,7 +303,7 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
             ) {
                 if (input.isEmpty()) {
                     Text(
-                        if (isListening) "Escuchando tu voz..." else "Mensaje",
+                        if (isListening) "Escuchando voz..." else "Mensaje",
                         color = if (isListening) colors.danger else colors.placeholder,
                         fontSize = 16.sp
                     )
@@ -265,32 +321,19 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
             val isPending = conversation.pending
             val canSend = input.isNotBlank() && !isPending
 
-            if (isPending) {
-                // Botón de Detener Búsqueda / Cancelar Generación
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(colors.danger)
-                        .clickable { viewModel.cancelAiRequest() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Filled.Stop, contentDescription = "Detener Búsqueda", tint = Color.White, modifier = Modifier.size(20.dp))
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(if (canSend) colors.accent else colors.avatarBg)
-                        .clickable(enabled = canSend) {
-                            viewModel.sendMessage(input)
-                            input = ""
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Enviar", tint = Color.White, modifier = Modifier.size(18.dp))
-                }
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(if (canSend) colors.accent else colors.avatarBg)
+                    .clickable(enabled = canSend) {
+                        triggerHapticFeedback(context)
+                        viewModel.sendMessage(input)
+                        input = ""
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Enviar", tint = Color.White, modifier = Modifier.size(18.dp))
             }
         }
     }

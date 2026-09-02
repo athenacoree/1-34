@@ -145,9 +145,9 @@ fun ChatListScreen(viewModel: AppViewModel) {
     }
     if (showSettings) {
         SettingsDialog(
-            settings = settings,
-            onDismiss = { viewModel.closeSettingsDialog() },
-            onSave = { key, model, theme -> viewModel.updateSettings(key, model, theme) }
+            currentSettings = settings,
+            viewModel = viewModel,
+            onDismiss = { viewModel.closeSettingsDialog() }
         )
     }
 }
@@ -236,7 +236,6 @@ private fun SwipeableChatRow(
     val scope = rememberCoroutineScope()
 
     Box(modifier = Modifier.fillMaxWidth()) {
-        // Fondo de acción "Eliminar", igual que .swipe-action en el CSS original
         Row(
             modifier = Modifier.matchParentSize().background(colors.danger),
             horizontalArrangement = Arrangement.End
