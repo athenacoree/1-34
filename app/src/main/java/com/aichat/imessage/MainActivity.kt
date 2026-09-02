@@ -1,6 +1,8 @@
 package com.aichat.imessage
 
+import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -30,7 +32,26 @@ class MainActivity : ComponentActivity() {
             val settings by viewModel.settings.collectAsState()
             val context = LocalContext.current
 
-            // Permiso de sistema pedido por la IA (cámara, micrófono, archivos, notificaciones)
+            // Solicitud inicial de permisos esenciales para la app al abrir
+            val initialPermissionsLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestMultiplePermissions()
+            ) { _ -> }
+
+            LaunchedEffect(Unit) {
+                val permissionsToRequest = mutableListOf(
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.CAMERA
+                )
+                if (Build.VERSION.SDK_INT >= 33) {
+                    permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+                    permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
+                } else {
+                    permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+                }
+                initialPermissionsLauncher.launch(permissionsToRequest.toTypedArray())
+            }
+
+            // Permiso individual solicitado dinámicamente por la IA o por voz
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
             ) { granted -> viewModel.onSystemPermissionResult(granted) }
@@ -40,7 +61,7 @@ class MainActivity : ComponentActivity() {
                 systemPermissionToLaunch?.let { permissionLauncher.launch(it) }
             }
 
-            // Selector de archivos para adjuntar al chat (se guardan en la base de datos local)
+            // Selector de archivos para adjuntar al chat
             val filePickerLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.GetContent()
             ) { uri -> uri?.let { viewModel.onFilePicked(it) } }
@@ -53,7 +74,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Compartir un .zip generado (ya sea por la IA o por "Exportar chat")
+            // Compartir un .zip generado
             val shareFile by viewModel.shareFile.collectAsState()
             LaunchedEffect(shareFile) {
                 shareFile?.let { file ->
