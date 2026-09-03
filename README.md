@@ -1,55 +1,93 @@
 # AI Chat (Android nativo — Kotlin + Jetpack Compose)
 
-Reescritura 100% nativa de tu app "AI Chat estilo iMessage". Ya **no** usa
-WebView ni HTML/CSS/JS: toda la interfaz está dibujada con Jetpack Compose y
-toda la lógica vive en Kotlin. Es la misma app, misma paleta de colores
-(clara/oscura), mismas funciones — solo que ahora corre como una app Android
-nativa de verdad.
+Aplicación Android nativa de mensajería con asistente de Inteligencia Artificial (OpenRouter API) e integraciones del sistema local.
 
-## ¿Qué cambia respecto a la versión anterior (WebView)?
-- Interfaz más fluida (sin el overhead de renderizar HTML/CSS dentro de un navegador embebido).
-- Menor consumo de memoria y batería.
-- El código es 100% Kotlin: para agregar funciones nuevas ya no se toca `app.js`, se edita directamente en `app/src/main/java/...`.
+---
 
-## Lo que NO cambia
-- **Sigue necesitando internet para hablar con la IA.** Esto es así en cualquier lenguaje (Kotlin, Swift, JS, lo que sea) porque el modelo de IA corre en los servidores de OpenRouter, no en el teléfono. Abrir la app, ver tus chats guardados y navegar la interfaz sí funciona sin conexión.
-- Tu clave de API y tus conversaciones se guardan solo en el teléfono (ahora en `SharedPreferences` en vez de `localStorage`, el equivalente nativo).
+## 🛠️ Características Principales
 
-## Estructura
-```
-AIChatNative/
-├── app/src/main/java/com/aichat/imessage/
-│   ├── MainActivity.kt          ← punto de entrada, monta Compose
-│   ├── data/
-│   │   ├── Models.kt             ← Conversation, ChatMessage, AppSettings
-│   │   ├── Storage.kt             ← persistencia (SharedPreferences)
-│   │   └── OpenRouterApi.kt       ← llamada HTTP a OpenRouter
-│   ├── viewmodel/AppViewModel.kt  ← toda la lógica (equivalente a app.js)
-│   └── ui/
-│       ├── theme/Theme.kt          ← paleta de colores clara/oscura
-│       ├── components/             ← Avatar, burbuja de mensaje, "escribiendo…"
-│       ├── AppRoot.kt               ← navegación lista ↔ chat
-│       ├── ChatListScreen.kt        ← lista de chats + swipe para borrar
-│       ├── ChatScreen.kt            ← conversación abierta
-│       ├── NewChatDialog.kt
-│       ├── SettingsDialog.kt
-│       └── ToastHost.kt
-├── build.gradle.kts / settings.gradle.kts / gradle.properties
-└── .github/workflows/build.yml   ← compila el APK automáticamente en GitHub
-```
+### 🔮 Motor de Inteligencia Artificial y Herramientas Nativas
+- **OpenRouter API**: Conexión con modelos como `openai/gpt-4o-mini`, Gemini, Claude, Llama, etc.
+- **Acciones nativas en segundo plano**: La IA puede ejecutar comandos `[[ACCION:...]]` para controlar el teléfono:
+  - ⏰ Crear alarmas y temporizadores.
+  - 🔦 Encender/apagar la linterna.
+  - 🔇 Activar/desactivar modo silencio.
+  - 📱 Abrir e interactuar con aplicaciones instaladas.
+  - 📞 Realizar llamadas y enviar SMS.
+  - 📦 Exportar y comprimir conversaciones y adjuntos en formato `.zip`.
 
-## Compilar en GitHub (sin instalar nada)
-1. Sube la carpeta `AIChatNative` a un repositorio de GitHub.
-2. Ve a la pestaña **Actions**. El workflow "Build APK" corre solo con cada
-   push a `main`, o dispáralo manualmente con **Run workflow**.
-3. Descarga el APK generado desde el artefacto **app-debug-apk**.
+### ⚡ Motor Local de Comandos (Sin consumo de tokens)
+Para ahorrar tokens de IA y ofrecer respuestas instantáneas (0 ms de latencia, 100% offline):
+- La app incluye un **intérprete de comandos en Kotlin puro** basado en expresiones regulares (`Regex`) y coincidencia de patrones en español.
+- **Ejemplos de comandos locales**:
+  - *"Pon una alarma a las 7:30"*
+  - *"Temporizador de 5 minutos"*
+  - *"Enciende la linterna"*
+  - *"Modo silencio"*
+  - *"Abre WhatsApp"*
+  - *"Llama a [contacto]"*
+  - *"Manda un sms a [número] diciendo [mensaje]"*
+  - *"Clima en [ciudad]"*
+  - *"Qué es [concepto]" / "Quién es [persona]"*
+  - *"Convertir 100 USD a EUR"*
+  - *"Noticias"*
+  - *"Busca fotos de [nombre]"*
+  - *"Traduce [texto] al [idioma]"*
+- **Evaluación de alternativas**: Se utilizó el enfoque de **Regex en Kotlin puro** por su ligereza (0 MB adicionales de almacenamiento), rapidez instantánea e independencia de internet. Para coincidencias conversacionales más complejas en el futuro, se puede evaluar incluir Google TensorFlow Lite Task Library (`NLClassifier`), que añade entre 1 y 20 MB pero permite clasificar intenciones con modelos de Machine Learning en el teléfono.
 
-## Compilar en tu computadora (opcional)
-1. Abre la carpeta con **Android Studio** (versión reciente, con soporte Compose).
-2. Deja que sincronice Gradle.
-3. Run ▶ para probarla, o **Build > Build APK(s)** para generar el instalable.
+### 🌐 Integraciones Nativas y APIs Gratuitas
+1. **Wikipedia API**: Resúmenes automáticos e instantáneos de cualquier concepto.
+2. **Open-Meteo API**: Clima actual y pronóstico por ciudad (sin necesidad de API key).
+3. **Frankfurter.app**: Conversor de divisas en tiempo real.
+4. **DuckDuckGo Instant Answers**: Búsqueda rápida de datos directos.
+5. **Noticias RSS**: Lectura de titulares actualizados (BBC Mundo).
+6. **YouTube Data API v3**: Búsqueda detallada de videos (título, canal, enlaces).
+7. **Google Custom Search API**: Búsqueda web real de Google.
+8. **ML Kit (On-Device ML)**:
+   - **Traducción sin conexión**: Traducción entre múltiples idiomas.
+   - **OCR (Reconocimiento de Texto)**: Extracción de texto desde imágenes tomadas con la cámara.
+   - **Escáner QR / Código de Barras**: Lectura de códigos QR.
+9. **Búsqueda de Fotos Locales (MediaStore)**: Búsqueda en la galería real del dispositivo por nombre o fecha.
 
-## Agregar nuevas funciones
-Cada una de las 30 funciones que hablamos antes (streaming, voz, imágenes,
-múltiples modelos, etc.) se puede ir agregando aquí mismo, directo en Kotlin.
-Si quieres, dime cuáles y las implemento.
+---
+
+## 🗣️ Dictado por Voz y Síntesis de Voz (TTS)
+
+- **Dictado por Voz (STT)**: Utiliza el reconocimiento de voz del sistema Android (`SpeechRecognizer`). *Nota: Requiere conexión a internet o el motor de voz del sistema instalado.*
+- **Modo Manos Libres y Voz Femenina Siri/Alexa**:
+  - La IA **solo lee sus respuestas en voz alta cuando el Modo Manos Libres está activo** (ícono de audífonos en la barra superior).
+  - Incluye un botón para **silenciar/detener la voz en cualquier momento** (ícono de altavoz tachado).
+  - El tono y velocidad de la voz se configuran y **se guardan permanentemente** en la app.
+
+---
+
+## 💾 Persistencia y Almacenamiento Local
+
+- **Historial de Chats y Mensajes**: Se guarda en una base de datos local **SQLite** (vía `ChatRepository`), garantizando privacidad y acceso offline a tus mensajes.
+- **Configuración y Ajustes**: Claves de API (OpenRouter, YouTube, Google), modelo seleccionado, tono/velocidad de voz y tema visual se guardan en **SharedPreferences**.
+
+---
+
+## 🔒 Permisos Just-In-Time (En tiempo de ejecución)
+
+Los permisos (micrófono, cámara, notificaciones, archivos/fotos) **NO se solicitan de golpe al abrir la app**. La app solicitará individualmente cada permiso únicamente cuando el usuario active por primera vez la función correspondiente (por ejemplo, micrófono al tocar el botón de dictado).
+
+---
+
+## 🤖 Asistente del Sistema (VoiceInteractionService)
+
+La app puede configurarse como el asistente digital predeterminado de Android (reemplazando a Google / Gemini):
+
+1. Ve a **Ajustes del teléfono > Aplicaciones > Aplicaciones predeterminadas > App de asistente digital**.
+2. Selecciona **AI Chat**.
+
+> ⚠️ **Nota sobre fabricantes (Samsung, Xiaomi, Huawei, etc.)**: En algunas capas de personalización (One UI, MIUI/HyperOS, EMUI), los fabricantes ocultan o deshabilitan la opción de cambiar el asistente digital predeterminado por restricciones del sistema operativo. Esto **no es un fallo de la app**, sino una limitación impuesta por el fabricante del dispositivo.
+
+---
+
+## 🚀 Compilar el Proyecto (GitHub Actions)
+
+El proyecto incluye un workflow de GitHub Actions en `.github/workflows/build.yml`:
+1. Sube el código a GitHub (rama `main`).
+2. La pestaña **Actions** compilará automáticamente el APK de depuración.
+3. Puedes descargar el instalable generado desde los artefactos (`app-debug-apk`).

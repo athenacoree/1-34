@@ -34,9 +34,12 @@ import com.aichat.imessage.tools.CommunicationHelper
 import com.aichat.imessage.tools.PermissionRequest
 import com.aichat.imessage.tools.PremiumVoiceTtsHelper
 import com.aichat.imessage.tools.SystemTaskHelper
-import com.aichat.imessage.tools.VoskVoiceHelper
+import com.aichat.imessage.tools.SpeechRecognitionHelper
 import com.aichat.imessage.tools.YouTubeHelper
 import com.aichat.imessage.tools.ZipUtil
+import com.aichat.imessage.tools.LocalCommandEngine
+import com.aichat.imessage.tools.LocalCommandResult
+import com.aichat.imessage.tools.ExternalIntegrationsHelper
 import com.aichat.imessage.tools.parseAiActions
 import com.aichat.imessage.tools.resolvePermissionKey
 import kotlinx.coroutines.Dispatchers
@@ -90,8 +93,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val handsFreeMode: StateFlow<Boolean> = _handsFreeMode.asStateFlow()
 
     // Configuración de la voz femenina premium
-    var voicePitch = 1.15f
-    var voiceSpeed = 0.98f
+    var voicePitch = _settings.value.voicePitch
+    var voiceSpeed = _settings.value.voiceSpeed
 
     // ---- Herramientas de la IA: permisos, adjuntos, zip, YouTube ----
 
@@ -158,8 +161,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun openConversation(id: String) { _activeId.value = id }
     fun closeChatPanel() { _activeId.value = null }
 
-    fun updateSettings(apiKey: String, model: String, theme: ThemeMode) {
-        _settings.value = AppSettings(apiKey.trim(), model.trim().ifBlank { "openai/gpt-4o-mini" }, theme)
+    fun updateSettings(
+        apiKey: String,
+        model: String,
+        theme: ThemeMode,
+        pitch: Float = voicePitch,
+        speed: Float = voiceSpeed,
+        youtubeApiKey: String = _settings.value.youtubeApiKey,
+        googleApiKey: String = _settings.value.googleApiKey,
+        googleCseId: String = _settings.value.googleCseId
+    ) {
+        voicePitch = pitch
+        voiceSpeed = speed
+        _settings.value = AppSettings(
+            apiKey = apiKey.trim(),
+            model = model.trim().ifBlank { "openai/gpt-4o-mini" },
+            theme = theme,
+            voicePitch = pitch,
+            voiceSpeed = speed,
+            youtubeApiKey = youtubeApiKey.trim(),
+            googleApiKey = googleApiKey.trim(),
+            googleCseId = googleCseId.trim()
+        )
         storage.saveSettings(_settings.value)
         _showSettings.value = false
         showToast("Configuración guardada", true)
@@ -191,7 +214,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
         stopVoiceRecognition()
 
-        VoskVoiceHelper.startListening(
+        SpeechRecognitionHelper.startListening(
             context = context,
             onResult = { text ->
                 if (text.isNotBlank()) {
@@ -250,7 +273,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopVoiceRecognition() {
-        VoskVoiceHelper.stopListening()
+        SpeechRecognitionHelper.stopListening()
         runCatching {
             speechRecognizer?.stopListening()
             speechRecognizer?.destroy()
@@ -268,16 +291,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         showToast(if (_handsFreeMode.value) "Modo manos libres activado" else "Modo manos libres desactivado", true)
     }
 
+    fun stopTts() {
+        PremiumVoiceTtsHelper.stop()
+        showToast("Lectura en voz alta detenida", true)
+    }
+
     fun sendMessage(text: String) {
         val trimmed = text.trim()
         val id = _activeId.value ?: return
         if (trimmed.isEmpty()) return
 
-        if (_settings.value.apiKey.isBlank()) {
-            showToast("Primero configura tu clave de OpenRouter", false)
-            _showSettings.value = true
-            return
-        }
+        val context = getApplication<Application>()
 
         viewModelScope.launch {
             val saved = withContext(Dispatchers.IO) {
@@ -285,6 +309,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             updateConversation(id) { c -> c.messages.add(saved); c.updatedAt = System.currentTimeMillis() }
             persistMeta(id)
+
+            // Intentar comando local primero (0 tokens, 0 costo, instantáneo)
+            val localResult = LocalCommandEngine.process(trimmed, context, _settings.value)
+            if (localResult is LocalCommandResult.Handled) {
+                val assistantMsg = withContext(Dispatchers.IO) {
+                    repository.insertMessage(
+                        id,
+                        ChatMessage(role = "assistant", content = localResult.replyText, time = System.currentTimeMillis())
+                    )
+                }
+                updateConversation(id) { c -> c.messages.add(assistantMsg); c.updatedAt = System.currentTimeMillis() }
+                if (_handsFreeMode.value) {
+                    PremiumVoiceTtsHelper.speak(localResult.replyText, pitch = voicePitch, speed = voiceSpeed)
+                }
+                if (localResult.actions.isNotEmpty()) {
+                    executeAiActions(id, localResult.actions)
+                }
+                persistMeta(id)
+                return@launch
+            }
+
+            if (_settings.value.apiKey.isBlank()) {
+                showToast("Primero configura tu clave de OpenRouter", false)
+                _showSettings.value = true
+                return@launch
+            }
+
             requestAiReply(id)
         }
     }
@@ -311,7 +362,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     updateConversation(id) { c -> c.messages.add(saved) }
-                    PremiumVoiceTtsHelper.speak(parsed.displayText, pitch = voicePitch, speed = voiceSpeed)
+                    if (_handsFreeMode.value) {
+                        PremiumVoiceTtsHelper.speak(parsed.displayText, pitch = voicePitch, speed = voiceSpeed)
+                    }
                 }
                 if (parsed.actions.isNotEmpty()) {
                     executeAiActions(id, parsed.actions)
@@ -546,6 +599,107 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val state = action.args.getOrNull(0)?.lowercase() ?: "on"
                     _handsFreeMode.value = state == "on" || state == "activar"
                     addToolLogMessage(conversationId, if (_handsFreeMode.value) "🗣️ Modo manos libres activo." else "🗣️ Modo manos libres desactivado.")
+                }
+
+                AiActionType.WIKIPEDIA -> {
+                    val q = action.args.getOrNull(0).orEmpty()
+                    if (q.isNotBlank()) {
+                        viewModelScope.launch {
+                            val res = ExternalIntegrationsHelper.fetchWikipediaSummary(q)
+                            addToolLogMessage(conversationId, res)
+                        }
+                    }
+                }
+
+                AiActionType.OPEN_METEO -> {
+                    val city = action.args.getOrNull(0).orEmpty()
+                    if (city.isNotBlank()) {
+                        viewModelScope.launch {
+                            val res = ExternalIntegrationsHelper.fetchOpenMeteoWeather(city)
+                            addToolLogMessage(conversationId, res)
+                        }
+                    }
+                }
+
+                AiActionType.FRANKFURTER -> {
+                    val amount = action.args.getOrNull(0)?.toDoubleOrNull() ?: 1.0
+                    val from = action.args.getOrNull(1).orEmpty()
+                    val to = action.args.getOrNull(2).orEmpty()
+                    viewModelScope.launch {
+                        val res = ExternalIntegrationsHelper.fetchFrankfurterRate(amount, from, to)
+                        addToolLogMessage(conversationId, res)
+                    }
+                }
+
+                AiActionType.DUCKDUCKGO -> {
+                    val q = action.args.getOrNull(0).orEmpty()
+                    if (q.isNotBlank()) {
+                        viewModelScope.launch {
+                            val res = ExternalIntegrationsHelper.fetchDuckDuckGoInstantAnswer(q)
+                            addToolLogMessage(conversationId, res)
+                        }
+                    }
+                }
+
+                AiActionType.RSS_NEWS -> {
+                    viewModelScope.launch {
+                        val res = ExternalIntegrationsHelper.fetchRssNews()
+                        addToolLogMessage(conversationId, res)
+                    }
+                }
+
+                AiActionType.YOUTUBE_API_SEARCH -> {
+                    val q = action.args.getOrNull(0).orEmpty()
+                    if (q.isNotBlank()) {
+                        viewModelScope.launch {
+                            val res = ExternalIntegrationsHelper.searchYouTubeDataApi(q, _settings.value.youtubeApiKey)
+                            addToolLogMessage(conversationId, res)
+                        }
+                    }
+                }
+
+                AiActionType.GOOGLE_SEARCH -> {
+                    val q = action.args.getOrNull(0).orEmpty()
+                    if (q.isNotBlank()) {
+                        viewModelScope.launch {
+                            val res = ExternalIntegrationsHelper.searchGoogleCustomSearch(q, _settings.value.googleApiKey, _settings.value.googleCseId)
+                            addToolLogMessage(conversationId, res)
+                        }
+                    }
+                }
+
+                AiActionType.MLKIT_TRANSLATE -> {
+                    val textToTr = action.args.getOrNull(0).orEmpty()
+                    val targetLang = action.args.getOrNull(1).orEmpty()
+                    ExternalIntegrationsHelper.mlKitTranslate(textToTr, targetLang) { res ->
+                        addToolLogMessage(conversationId, res)
+                    }
+                }
+
+                AiActionType.BUSCAR_FOTOS -> {
+                    val q = action.args.getOrNull(0).orEmpty()
+                    viewModelScope.launch {
+                        val res = ExternalIntegrationsHelper.searchLocalPhotos(context, q)
+                        addToolLogMessage(conversationId, res)
+                    }
+                }
+
+                AiActionType.MLKIT_OCR -> {
+                    val uriStr = action.args.getOrNull(0).orEmpty()
+                    if (uriStr.isNotBlank()) {
+                        ExternalIntegrationsHelper.mlKitRecognizeText(context, Uri.parse(uriStr)) { res ->
+                            addToolLogMessage(conversationId, res)
+                        }
+                    }
+                }
+
+                AiActionType.MLKIT_BARCODE -> {
+                    val uriStr = action.args.getOrNull(0).orEmpty()
+                    if (uriStr.isNotBlank()) {
+                        ExternalIntegrationsHelper.mlKitScanBarcode(context, Uri.parse(uriStr)) { res ->
+                            addToolLogMessage(conversationId, res)
+                        }
+                    }
                 }
             }
         }

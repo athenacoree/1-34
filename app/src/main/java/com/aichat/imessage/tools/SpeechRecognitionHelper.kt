@@ -8,7 +8,11 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import java.util.Locale
 
-object VoskVoiceHelper {
+/**
+ * Helper de reconocimiento de voz del sistema Android.
+ * Requiere conexión a internet / servicio de voz del sistema.
+ */
+object SpeechRecognitionHelper {
 
     private var speechRecognizer: SpeechRecognizer? = null
 
@@ -19,7 +23,7 @@ object VoskVoiceHelper {
     ) {
         try {
             if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-                onError("Reconocimiento de voz no disponible.")
+                onError("Reconocimiento de voz no disponible en este dispositivo.")
                 return
             }
 

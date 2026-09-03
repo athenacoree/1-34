@@ -39,6 +39,8 @@ import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -164,6 +166,13 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
                     Icons.Filled.Headset,
                     contentDescription = "Manos libres",
                     tint = if (handsFreeMode) colors.accent else colors.textSecondary
+                )
+            }
+            IconButton(onClick = { viewModel.stopTts() }) {
+                Icon(
+                    Icons.Filled.VolumeOff,
+                    contentDescription = "Silenciar voz",
+                    tint = colors.textSecondary
                 )
             }
             IconButton(onClick = { viewModel.exportConversation(conversation.id) }) {
@@ -319,21 +328,36 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
             Spacer(Modifier.width(8.dp))
 
             val isPending = conversation.pending
-            val canSend = input.isNotBlank() && !isPending
-
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(if (canSend) colors.accent else colors.avatarBg)
-                    .clickable(enabled = canSend) {
-                        triggerHapticFeedback(context)
-                        viewModel.sendMessage(input)
-                        input = ""
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Enviar", tint = Color.White, modifier = Modifier.size(18.dp))
+            if (isPending) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(colors.danger)
+                        .clickable {
+                            triggerHapticFeedback(context)
+                            viewModel.cancelAiRequest()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.Stop, contentDescription = "Detener respuesta", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+            } else {
+                val canSend = input.isNotBlank()
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(if (canSend) colors.accent else colors.avatarBg)
+                        .clickable(enabled = canSend) {
+                            triggerHapticFeedback(context)
+                            viewModel.sendMessage(input)
+                            input = ""
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Enviar", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
             }
         }
     }
