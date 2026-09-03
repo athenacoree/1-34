@@ -26,7 +26,12 @@ class Storage(context: Context) {
                     "light" -> ThemeMode.LIGHT
                     "dark" -> ThemeMode.DARK
                     else -> ThemeMode.SYSTEM
-                }
+                },
+                voicePitch = o.optDouble("voicePitch", 1.15).toFloat(),
+                voiceSpeed = o.optDouble("voiceSpeed", 0.98).toFloat(),
+                youtubeApiKey = o.optString("youtubeApiKey", ""),
+                googleApiKey = o.optString("googleApiKey", ""),
+                googleCseId = o.optString("googleCseId", "")
             )
         } catch (e: Exception) {
             AppSettings()
@@ -45,6 +50,11 @@ class Storage(context: Context) {
                 ThemeMode.SYSTEM -> "system"
             }
         )
+        o.put("voicePitch", s.voicePitch.toDouble())
+        o.put("voiceSpeed", s.voiceSpeed.toDouble())
+        o.put("youtubeApiKey", s.youtubeApiKey)
+        o.put("googleApiKey", s.googleApiKey)
+        o.put("googleCseId", s.googleCseId)
         prefs.edit { putString(SETTINGS_KEY, o.toString()) }
     }
 }

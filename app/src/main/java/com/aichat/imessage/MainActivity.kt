@@ -32,26 +32,7 @@ class MainActivity : ComponentActivity() {
             val settings by viewModel.settings.collectAsState()
             val context = LocalContext.current
 
-            // Solicitud inicial de permisos esenciales para la app al abrir
-            val initialPermissionsLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestMultiplePermissions()
-            ) { _ -> }
-
-            LaunchedEffect(Unit) {
-                val permissionsToRequest = mutableListOf(
-                    Manifest.permission.RECORD_AUDIO,
-                    Manifest.permission.CAMERA
-                )
-                if (Build.VERSION.SDK_INT >= 33) {
-                    permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-                    permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
-                } else {
-                    permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-                }
-                initialPermissionsLauncher.launch(permissionsToRequest.toTypedArray())
-            }
-
-            // Permiso individual solicitado dinámicamente por la IA o por voz
+            // Permiso individual solicitado dinámicamente cuando una función lo requiere por primera vez
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
             ) { granted -> viewModel.onSystemPermissionResult(granted) }

@@ -23,33 +23,35 @@ object AppLauncherHelper {
     }
 
     fun openAppByNameOrPackage(context: Context, query: String): Boolean {
-        val pm = context.packageManager
-        val trimmed = query.trim()
-        if (trimmed.isEmpty()) return false
+        return runCatching {
+            val pm = context.packageManager ?: return false
+            val trimmed = query.trim()
+            if (trimmed.isEmpty()) return false
 
-        // 1. Intentar lanzar directo por nombre de paquete
-        val launchIntent = pm.getLaunchIntentForPackage(trimmed)
-        if (launchIntent != null) {
-            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(launchIntent)
-            return true
-        }
-
-        // 2. Buscar coincidencias en apps instaladas por nombre
-        val installed = getInstalledApps(context)
-        val match = installed.find { it.name.equals(trimmed, ignoreCase = true) }
-            ?: installed.find { it.name.contains(trimmed, ignoreCase = true) }
-            ?: installed.find { it.packageName.contains(trimmed, ignoreCase = true) }
-
-        if (match != null) {
-            val intent = pm.getLaunchIntentForPackage(match.packageName)
-            if (intent != null) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
+            // 1. Intentar lanzar directo por nombre de paquete
+            val launchIntent = pm.getLaunchIntentForPackage(trimmed)
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(launchIntent)
                 return true
             }
-        }
 
-        return false
+            // 2. Buscar coincidencias en apps instaladas por nombre
+            val installed = getInstalledApps(context)
+            val match = installed.find { it.name.equals(trimmed, ignoreCase = true) }
+                ?: installed.find { it.name.contains(trimmed, ignoreCase = true) }
+                ?: installed.find { it.packageName.contains(trimmed, ignoreCase = true) }
+
+            if (match != null) {
+                val intent = pm.getLaunchIntentForPackage(match.packageName)
+                if (intent != null) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                    return true
+                }
+            }
+
+            false
+        }.getOrDefault(false)
     }
 }

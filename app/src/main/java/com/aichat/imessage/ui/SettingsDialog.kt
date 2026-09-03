@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
@@ -47,6 +49,12 @@ fun SettingsDialog(
     var pitch by remember { mutableFloatStateOf(viewModel.voicePitch) }
     var speed by remember { mutableFloatStateOf(viewModel.voiceSpeed) }
 
+    var youtubeApiKey by remember { mutableStateOf(currentSettings.youtubeApiKey) }
+    var googleApiKey by remember { mutableStateOf(currentSettings.googleApiKey) }
+    var googleCseId by remember { mutableStateOf(currentSettings.googleCseId) }
+
+    val scrollState = rememberScrollState()
+
     Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -54,6 +62,7 @@ fun SettingsDialog(
                 .clip(RoundedCornerShape(16.dp))
                 .background(colors.bgCard)
                 .padding(20.dp)
+                .verticalScroll(scrollState)
         ) {
             Text("Configuración de IA y Voz", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = colors.text)
             Spacer(Modifier.height(14.dp))
@@ -71,6 +80,36 @@ fun SettingsDialog(
             OutlinedTextField(
                 value = model,
                 onValueChange = { model = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(Modifier.height(14.dp))
+
+            Text("Claves de API opcionales", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = colors.text)
+            Spacer(Modifier.height(6.dp))
+
+            Text("YouTube Data API Key (Opcional)", fontSize = 12.sp, color = colors.textSecondary)
+            OutlinedTextField(
+                value = youtubeApiKey,
+                onValueChange = { youtubeApiKey = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(Modifier.height(8.dp))
+
+            Text("Google Custom Search API Key (Opcional)", fontSize = 12.sp, color = colors.textSecondary)
+            OutlinedTextField(
+                value = googleApiKey,
+                onValueChange = { googleApiKey = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(Modifier.height(8.dp))
+
+            Text("Google Search Engine ID / CX (Opcional)", fontSize = 12.sp, color = colors.textSecondary)
+            OutlinedTextField(
+                value = googleCseId,
+                onValueChange = { googleCseId = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -106,7 +145,16 @@ fun SettingsDialog(
                     onClick = {
                         viewModel.voicePitch = pitch
                         viewModel.voiceSpeed = speed
-                        viewModel.updateSettings(apiKey, model, theme)
+                        viewModel.updateSettings(
+                            apiKey = apiKey,
+                            model = model,
+                            theme = theme,
+                            pitch = pitch,
+                            speed = speed,
+                            youtubeApiKey = youtubeApiKey,
+                            googleApiKey = googleApiKey,
+                            googleCseId = googleCseId
+                        )
                     }
                 ) {
                     Text("Guardar", color = colors.accent, fontWeight = FontWeight.Bold)

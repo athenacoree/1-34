@@ -39,7 +39,18 @@ enum class AiActionType {
     NOTAS,
     LEER_CONTACTO,
     BUSCAR_ARCHIVO,
-    MODO_MANOS_LIBRES
+    MODO_MANOS_LIBRES,
+    WIKIPEDIA,
+    OPEN_METEO,
+    FRANKFURTER,
+    DUCKDUCKGO,
+    RSS_NEWS,
+    YOUTUBE_API_SEARCH,
+    GOOGLE_SEARCH,
+    MLKIT_TRANSLATE,
+    MLKIT_OCR,
+    MLKIT_BARCODE,
+    BUSCAR_FOTOS
 }
 
 data class AiAction(val type: AiActionType, val args: List<String>)
