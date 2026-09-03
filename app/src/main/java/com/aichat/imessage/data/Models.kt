@@ -37,13 +37,16 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 data class AppSettings(
     val apiKey: String = "",
-    val model: String = "openai/gpt-4o-mini",
+    val model: String = "google/gemini-2.0-flash-exp:free",
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val voicePitch: Float = 1.15f,
     val voiceSpeed: Float = 0.98f,
     val youtubeApiKey: String = "",
     val googleApiKey: String = "",
-    val googleCseId: String = ""
+    val googleCseId: String = "",
+    val nasaApiKey: String = "",
+    val biometricLockEnabled: Boolean = false,
+    val readNotificationsEnabled: Boolean = false
 )
 
 val AVATAR_PALETTE = listOf("#0B6CFF", "#34C759", "#FF9F0A", "#AF52DE", "#FF3B30", "#5AC8FA", "#FF2D55")

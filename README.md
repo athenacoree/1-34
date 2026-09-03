@@ -85,9 +85,14 @@ La app puede configurarse como el asistente digital predeterminado de Android (r
 
 ---
 
-## 🚀 Compilar el Proyecto (GitHub Actions)
+## 🚀 Compilar y Firmar el Proyecto (GitHub Actions)
 
 El proyecto incluye un workflow de GitHub Actions en `.github/workflows/build.yml`:
 1. Sube el código a GitHub (rama `main`).
-2. La pestaña **Actions** compilará automáticamente el APK de depuración.
-3. Puedes descargar el instalable generado desde los artefactos (`app-debug-apk`).
+2. Configura los siguientes secretos en **Settings → Secrets and variables → Actions**:
+   - `KEYSTORE_BASE64`: El archivo `.jks` codificado en Base64.
+   - `KEYSTORE_PASSWORD`: Contraseña del keystore (`debugging`).
+   - `KEY_ALIAS`: Alias de la clave (`debugging`).
+   - `KEY_PASSWORD`: Contraseña de la clave (`debugging`).
+3. La pestaña **Actions** compilará automáticamente tanto el APK de depuración (`app-debug-apk`) como el APK de versión firmado (`app-release-apk`).
+4. Puedes descargar los instalables desde los artefactos del flujo de trabajo.

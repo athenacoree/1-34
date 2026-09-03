@@ -114,6 +114,7 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
     val isListening by viewModel.isListening.collectAsState()
     val spokenText by viewModel.spokenText.collectAsState()
     val handsFreeMode by viewModel.handsFreeMode.collectAsState()
+    val dailyUsage by viewModel.dailyUsage.collectAsState()
 
     if (conversation == null) {
         LaunchedEffect(Unit) { viewModel.closeChatPanel() }
@@ -155,8 +156,10 @@ fun ChatScreen(viewModel: AppViewModel, chatId: String) {
                     fontSize = 16.sp,
                     color = colors.text
                 )
+                val (paidMsgs, paidTokens) = dailyUsage
+                val usageSubtitle = if (paidMsgs > 0) " | De pago hoy: $paidMsgs (~${paidTokens}t)" else ""
                 Text(
-                    if (handsFreeMode) "Manos libres activo" else "En línea",
+                    (if (handsFreeMode) "Manos libres" else "En línea") + usageSubtitle,
                     fontSize = 11.sp,
                     color = if (handsFreeMode) colors.accent else colors.textSecondary
                 )

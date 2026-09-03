@@ -21,7 +21,7 @@ class Storage(context: Context) {
             val o = JSONObject(raw)
             AppSettings(
                 apiKey = o.optString("apiKey", ""),
-                model = o.optString("model", "openai/gpt-4o-mini"),
+                model = o.optString("model", "google/gemini-2.0-flash-exp:free"),
                 theme = when (o.optString("theme", "system")) {
                     "light" -> ThemeMode.LIGHT
                     "dark" -> ThemeMode.DARK
@@ -31,7 +31,10 @@ class Storage(context: Context) {
                 voiceSpeed = o.optDouble("voiceSpeed", 0.98).toFloat(),
                 youtubeApiKey = o.optString("youtubeApiKey", ""),
                 googleApiKey = o.optString("googleApiKey", ""),
-                googleCseId = o.optString("googleCseId", "")
+                googleCseId = o.optString("googleCseId", ""),
+                nasaApiKey = o.optString("nasaApiKey", ""),
+                biometricLockEnabled = o.optBoolean("biometricLockEnabled", false),
+                readNotificationsEnabled = o.optBoolean("readNotificationsEnabled", false)
             )
         } catch (e: Exception) {
             AppSettings()
@@ -55,6 +58,31 @@ class Storage(context: Context) {
         o.put("youtubeApiKey", s.youtubeApiKey)
         o.put("googleApiKey", s.googleApiKey)
         o.put("googleCseId", s.googleCseId)
+        o.put("nasaApiKey", s.nasaApiKey)
+        o.put("biometricLockEnabled", s.biometricLockEnabled)
+        o.put("readNotificationsEnabled", s.readNotificationsEnabled)
         prefs.edit { putString(SETTINGS_KEY, o.toString()) }
+    }
+
+    fun getDailyUsage(): Pair<Int, Int> {
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        val savedDate = prefs.getString("usage_date", "")
+        if (savedDate != today) {
+            prefs.edit {
+                putString("usage_date", today)
+                putInt("paid_msgs", 0)
+                putInt("paid_tokens", 0)
+            }
+            return Pair(0, 0)
+        }
+        return Pair(prefs.getInt("paid_msgs", 0), prefs.getInt("paid_tokens", 0))
+    }
+
+    fun addPaidUsage(tokensEst: Int) {
+        val (msgs, tokens) = getDailyUsage()
+        prefs.edit {
+            putInt("paid_msgs", msgs + 1)
+            putInt("paid_tokens", tokens + tokensEst)
+        }
     }
 }

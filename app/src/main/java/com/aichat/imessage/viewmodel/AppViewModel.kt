@@ -110,6 +110,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _shareFile = MutableStateFlow<File?>(null)
     val shareFile: StateFlow<File?> = _shareFile.asStateFlow()
 
+    private val _dailyUsage = MutableStateFlow(storage.getDailyUsage())
+    val dailyUsage: StateFlow<Pair<Int, Int>> = _dailyUsage.asStateFlow()
+
     private var pendingPermissionConversationId: String? = null
     private var pendingPermissionLabel: String? = null
 
@@ -169,19 +172,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         speed: Float = voiceSpeed,
         youtubeApiKey: String = _settings.value.youtubeApiKey,
         googleApiKey: String = _settings.value.googleApiKey,
-        googleCseId: String = _settings.value.googleCseId
+        googleCseId: String = _settings.value.googleCseId,
+        nasaApiKey: String = _settings.value.nasaApiKey,
+        biometricLockEnabled: Boolean = _settings.value.biometricLockEnabled,
+        readNotificationsEnabled: Boolean = _settings.value.readNotificationsEnabled
     ) {
         voicePitch = pitch
         voiceSpeed = speed
         _settings.value = AppSettings(
             apiKey = apiKey.trim(),
-            model = model.trim().ifBlank { "openai/gpt-4o-mini" },
+            model = model.trim().ifBlank { "google/gemini-2.0-flash-exp:free" },
             theme = theme,
             voicePitch = pitch,
             voiceSpeed = speed,
             youtubeApiKey = youtubeApiKey.trim(),
             googleApiKey = googleApiKey.trim(),
-            googleCseId = googleCseId.trim()
+            googleCseId = googleCseId.trim(),
+            nasaApiKey = nasaApiKey.trim(),
+            biometricLockEnabled = biometricLockEnabled,
+            readNotificationsEnabled = readNotificationsEnabled
         )
         storage.saveSettings(_settings.value)
         _showSettings.value = false
@@ -349,22 +358,53 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val model = _settings.value.model
             val messagesSnapshot = conv.messages.toList()
 
+            val placeholder = withContext(Dispatchers.IO) {
+                repository.insertMessage(
+                    id,
+                    ChatMessage(role = "assistant", content = "", time = System.currentTimeMillis())
+                )
+            }
+            updateConversation(id) { c -> c.messages.add(placeholder) }
+
+            val streamedText = StringBuilder()
+
             try {
-                val reply = withContext(Dispatchers.IO) {
-                    OpenRouterApi.sendChat(apiKey, model, messagesSnapshot)
+                withContext(Dispatchers.IO) {
+                    OpenRouterApi.streamChat(apiKey, model, messagesSnapshot) { chunk ->
+                        streamedText.append(chunk)
+                        val currentText = streamedText.toString()
+                        updateConversation(id) { c ->
+                            val msgIdx = c.messages.indexOfFirst { it.id == placeholder.id }
+                            if (msgIdx >= 0) {
+                                c.messages[msgIdx] = c.messages[msgIdx].copy(content = currentText)
+                            }
+                        }
+                    }
                 }
-                val parsed = parseAiActions(reply)
-                if (parsed.displayText.isNotBlank()) {
-                    val saved = withContext(Dispatchers.IO) {
-                        repository.insertMessage(
-                            id,
-                            ChatMessage(role = "assistant", content = parsed.displayText, time = System.currentTimeMillis())
-                        )
+
+                val finalFullText = streamedText.toString()
+                if (!model.endsWith(":free")) {
+                    val estTokens = (messagesSnapshot.sumOf { it.content.length } + finalFullText.length) / 4
+                    storage.addPaidUsage(estTokens)
+                    _dailyUsage.value = storage.getDailyUsage()
+                }
+
+                val parsed = parseAiActions(finalFullText)
+                if (parsed.displayText != finalFullText) {
+                    val saved = placeholder.copy(content = parsed.displayText)
+                    withContext(Dispatchers.IO) { repository.updateMessage(saved) }
+                    updateConversation(id) { c ->
+                        val msgIdx = c.messages.indexOfFirst { it.id == placeholder.id }
+                        if (msgIdx >= 0) c.messages[msgIdx] = saved
                     }
-                    updateConversation(id) { c -> c.messages.add(saved) }
-                    if (_handsFreeMode.value) {
-                        PremiumVoiceTtsHelper.speak(parsed.displayText, pitch = voicePitch, speed = voiceSpeed)
+                } else {
+                    withContext(Dispatchers.IO) {
+                        repository.updateMessage(placeholder.copy(content = finalFullText))
                     }
+                }
+
+                if (_handsFreeMode.value && parsed.displayText.isNotBlank()) {
+                    PremiumVoiceTtsHelper.speak(parsed.displayText, pitch = voicePitch, speed = voiceSpeed)
                 }
                 if (parsed.actions.isNotEmpty()) {
                     executeAiActions(id, parsed.actions)
@@ -373,18 +413,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (e is kotlinx.coroutines.CancellationException) {
                     addToolLogMessage(id, "⏹️ Búsqueda/Respuesta detenida.")
                 } else {
-                    val saved = withContext(Dispatchers.IO) {
-                        repository.insertMessage(
-                            id,
-                            ChatMessage(
-                                role = "assistant",
-                                content = "No se pudo obtener respuesta: ${e.message}",
-                                time = System.currentTimeMillis(),
-                                error = true
-                            )
-                        )
+                    val saved = placeholder.copy(
+                        content = "No se pudo obtener respuesta: ${e.message}",
+                        error = true
+                    )
+                    withContext(Dispatchers.IO) { repository.updateMessage(saved) }
+                    updateConversation(id) { c ->
+                        val msgIdx = c.messages.indexOfFirst { it.id == placeholder.id }
+                        if (msgIdx >= 0) c.messages[msgIdx] = saved
                     }
-                    updateConversation(id) { c -> c.messages.add(saved) }
                     showToast("Error al contactar la IA", false)
                 }
             } finally {
@@ -701,6 +738,100 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
+
+                AiActionType.EL_TOQUE -> {
+                    viewModelScope.launch {
+                        val res = ExternalIntegrationsHelper.fetchElToqueRates()
+                        addToolLogMessage(conversationId, res)
+                    }
+                }
+
+                AiActionType.ETECSA_USSD -> {
+                    val code = action.args.getOrNull(0) ?: "*222#"
+                    val res = ExternalIntegrationsHelper.executeEtecsaUssd(context, code)
+                    addToolLogMessage(conversationId, res)
+                }
+
+                AiActionType.NAGER_DATE -> {
+                    val code = action.args.getOrNull(0) ?: "CU"
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchNagerHolidays(code)) }
+                }
+
+                AiActionType.AIR_QUALITY -> {
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchAirQuality()) }
+                }
+
+                AiActionType.SUNRISE_SUNSET -> {
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchSunriseSunset()) }
+                }
+
+                AiActionType.COINGECKO -> {
+                    val crypto = action.args.getOrNull(0) ?: "bitcoin"
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchCoinGeckoCrypto(crypto)) }
+                }
+
+                AiActionType.USGS_EARTHQUAKE -> {
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchUsgsEarthquakes()) }
+                }
+
+                AiActionType.REST_COUNTRIES -> {
+                    val country = action.args.getOrNull(0) ?: "Cuba"
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchRestCountry(country)) }
+                }
+
+                AiActionType.TRIVIA -> {
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchOpenTrivia()) }
+                }
+
+                AiActionType.ADVICE_SLIP -> {
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchAdviceSlip()) }
+                }
+
+                AiActionType.NUMBERS_API -> {
+                    val num = action.args.getOrNull(0) ?: "random"
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchNumbersApi(num)) }
+                }
+
+                AiActionType.NASA_APOD -> {
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchNasaApod(_settings.value.nasaApiKey)) }
+                }
+
+                AiActionType.IPIFY -> {
+                    viewModelScope.launch { addToolLogMessage(conversationId, ExternalIntegrationsHelper.fetchIpifyPublicIp()) }
+                }
+
+                AiActionType.GENERAR_IMAGEN -> {
+                    val prompt = action.args.getOrNull(0).orEmpty()
+                    if (prompt.isNotBlank()) {
+                        viewModelScope.launch {
+                            val (text, file) = ExternalIntegrationsHelper.generatePollinationsImage(context, prompt)
+                            if (file != null) {
+                                val attachment = Attachment(
+                                    fileName = file.name,
+                                    localPath = file.absolutePath,
+                                    mimeType = "image/png",
+                                    sizeBytes = file.length()
+                                )
+                                val saved = withContext(Dispatchers.IO) {
+                                    repository.insertMessage(
+                                        conversationId,
+                                        ChatMessage(
+                                            role = "assistant",
+                                            content = text,
+                                            time = System.currentTimeMillis(),
+                                            displayMode = MessageDisplayMode.PLAIN,
+                                            attachments = listOf(attachment)
+                                        )
+                                    )
+                                }
+                                updateConversation(conversationId) { c -> c.messages.add(saved); c.updatedAt = System.currentTimeMillis() }
+                                persistMeta(conversationId)
+                            } else {
+                                addToolLogMessage(conversationId, text)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -807,6 +938,71 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ---- Exportar / compartir chat como zip ----
+
+    fun handleSharedContent(text: String?, imageUri: Uri?) {
+        val convs = _conversations.value
+        val targetConv = convs.firstOrNull() ?: run {
+            createConversation("Chat compartido")
+            _conversations.value.first()
+        }
+        _activeId.value = targetConv.id
+
+        if (!text.isNullOrBlank()) {
+            sendMessage("Contenido compartido:\n$text")
+        } else if (imageUri != null) {
+            onFilePicked(imageUri)
+        }
+    }
+
+    fun exportAllData() {
+        val context = getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
+                val sdf = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault())
+
+                val convsList = _conversations.value
+                val convsJson = org.json.JSONArray()
+                convsList.forEach { c ->
+                    val co = org.json.JSONObject().apply {
+                        put("id", c.id)
+                        put("name", c.name)
+                        put("avatarColor", c.avatarColor)
+                        put("updatedAt", c.updatedAt)
+                        val msgsArr = org.json.JSONArray()
+                        c.messages.forEach { m ->
+                            msgsArr.put(org.json.JSONObject().apply {
+                                put("role", m.role)
+                                put("content", m.content)
+                                put("time", m.time)
+                                put("error", m.error)
+                            })
+                        }
+                        put("messages", msgsArr)
+                    }
+                    convsJson.put(co)
+                }
+                val convsFile = File(exportDir, "conversaciones.json")
+                convsFile.writeText(convsJson.toString(2))
+
+                val settingsObj = org.json.JSONObject().apply {
+                    put("theme", _settings.value.theme.name)
+                    put("voicePitch", _settings.value.voicePitch)
+                    put("voiceSpeed", _settings.value.voiceSpeed)
+                }
+                val settingsFile = File(exportDir, "configuracion_sin_claves.json")
+                settingsFile.writeText(settingsObj.toString(2))
+
+                val allAttachments = convsList.flatMap { it.messages }.flatMap { it.attachments }.map { File(it.localPath) }
+                val zipFile = File(exportDir, "aichat_respaldo_completo_${sdf.format(java.util.Date())}.zip")
+                ZipUtil.createZip(zipFile, listOf(convsFile, settingsFile) + allAttachments.filter { it.exists() })
+
+                withContext(Dispatchers.Main) { _shareFile.value = zipFile }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { showToast("Error al exportar respaldo completo: ${e.message}", false) }
+            }
+        }
+    }
 
     fun exportConversation(id: String) {
         val context = getApplication<Application>()
