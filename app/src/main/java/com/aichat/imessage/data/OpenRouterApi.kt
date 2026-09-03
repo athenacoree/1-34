@@ -58,29 +58,36 @@ Reglas:
 - No inventes respuestas de acciones: si ejecutas una acción real, el teléfono la abrirá/ejecutará de inmediato.
 """
 
-    fun sendChat(apiKey: String, model: String, messages: List<ChatMessage>): String {
-        var lastException: Exception? = null
-        val maxRetries = 2
+    fun streamChat(
+        apiKey: String,
+        model: String,
+        messages: List<ChatMessage>,
+        onChunk: (String) -> Unit
+    ): String {
+        val trimmedMessages = if (messages.size > 20) messages.takeLast(20) else messages
+        val fallbackModel = "google/gemini-2.0-flash-exp:free"
 
-        for (attempt in 0..maxRetries) {
-            try {
-                return executeHttpCall(apiKey, model, messages)
-            } catch (e: Exception) {
-                lastException = e
-                if (e is ApiException && e.message?.contains("HTTP") == true && !e.message!!.contains("500") && !e.message!!.contains("502") && !e.message!!.contains("503") && !e.message!!.contains("504")) {
-                    throw e
-                }
-                if (attempt < maxRetries) {
-                    try { Thread.sleep(1000L * (attempt + 1)) } catch (_: InterruptedException) {}
-                }
+        try {
+            return executeStreamCall(apiKey, model, trimmedMessages, onChunk)
+        } catch (e: Exception) {
+            if (!model.endsWith(":free") && model != fallbackModel) {
+                onChunk("\n\n⚠️ *[Error en $model, usando respaldo gratuito: $fallbackModel]*\n\n")
+                return executeStreamCall(apiKey, fallbackModel, trimmedMessages, onChunk)
+            } else {
+                throw e
             }
         }
-        throw lastException ?: ApiException("Error desconocido de red")
     }
 
-    private fun executeHttpCall(apiKey: String, model: String, messages: List<ChatMessage>): String {
+    private fun executeStreamCall(
+        apiKey: String,
+        model: String,
+        messages: List<ChatMessage>,
+        onChunk: (String) -> Unit
+    ): String {
         val url = URL("https://openrouter.ai/api/v1/chat/completions")
         val conn = url.openConnection() as HttpURLConnection
+        val fullResponse = StringBuilder()
         try {
             conn.requestMethod = "POST"
             conn.doOutput = true
@@ -107,17 +114,17 @@ Reglas:
                 )
             }
             val body = JSONObject().apply {
-                put("model", model.ifBlank { "openai/gpt-4o-mini" })
+                put("model", model.ifBlank { "google/gemini-2.0-flash-exp:free" })
+                put("stream", true)
                 put("messages", payloadMessages)
             }
 
             OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body.toString()) }
 
             val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val text = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
-
             if (code !in 200..299) {
+                val stream = conn.errorStream ?: conn.inputStream
+                val text = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
                 val msg = try {
                     val errObj = JSONObject(text)
                     errObj.optJSONObject("error")?.optString("message") ?: "Error HTTP $code"
@@ -127,13 +134,36 @@ Reglas:
                 throw ApiException(msg)
             }
 
-            val data = JSONObject(text)
-            val choices = data.optJSONArray("choices")
-            val first = choices?.optJSONObject(0)
-            val message = first?.optJSONObject("message")
-            return message?.optString("content")?.takeIf { it.isNotBlank() } ?: "(Respuesta vacía del modelo)"
+            BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { reader ->
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    val l = line?.trim().orEmpty()
+                    if (l.startsWith("data: ")) {
+                        val data = l.substring(6).trim()
+                        if (data == "[DONE]") break
+                        if (data.startsWith("{")) {
+                            try {
+                                val json = JSONObject(data)
+                                val choices = json.optJSONArray("choices")
+                                val delta = choices?.optJSONObject(0)?.optJSONObject("delta")
+                                val content = delta?.optString("content")
+                                if (!content.isNullOrEmpty()) {
+                                    fullResponse.append(content)
+                                    onChunk(content)
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+            return fullResponse.toString().ifBlank { "(Respuesta vacía)" }
         } finally {
             conn.disconnect()
         }
+    }
+
+    fun sendChat(apiKey: String, model: String, messages: List<ChatMessage>): String {
+        val sb = StringBuilder()
+        return streamChat(apiKey, model, messages) { sb.append(it) }
     }
 }

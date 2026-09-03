@@ -131,6 +131,16 @@ class ChatRepository(context: Context) {
         return attachment.copy(id = newId)
     }
 
+    fun updateMessage(message: ChatMessage) {
+        val db = helper.writableDatabase
+        val values = ContentValues().apply {
+            put("content", message.content)
+            put("error", if (message.error) 1 else 0)
+            put("displayMode", message.displayMode.name)
+        }
+        db.update("messages", values, "id = ?", arrayOf(message.id.toString()))
+    }
+
     /** Importa una sola vez las conversaciones del guardado antiguo (SharedPreferences en JSON),
      * si existían, y luego limpia esa clave para no duplicar en el futuro. */
     fun migrateLegacyJsonIfNeeded() {

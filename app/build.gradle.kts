@@ -15,9 +15,26 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        create("release") {
+            val storeFilePath = System.getenv("KEYSTORE_FILE_PATH") ?: "release.jks"
+            val storeFileObj = file(storeFilePath)
+            if (storeFileObj.exists()) {
+                storeFile = storeFileObj
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "debugging"
+                keyAlias = System.getenv("KEY_ALIAS") ?: "debugging"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: "debugging"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            val relSigning = signingConfigs.getByName("release")
+            if (relSigning.storeFile != null && relSigning.storeFile!!.exists()) {
+                signingConfig = relSigning
+            }
         }
     }
 
@@ -61,6 +78,9 @@ dependencies {
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
     implementation("com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.0")
+
+    // Biometric prompt for app lock
+    implementation("androidx.biometric:biometric-ktx:1.2.0-alpha05")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.11.0")

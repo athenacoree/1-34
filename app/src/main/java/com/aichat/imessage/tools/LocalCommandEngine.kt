@@ -14,6 +14,108 @@ object LocalCommandEngine {
         val trimmed = text.trim()
         val lower = trimmed.lowercase()
 
+        // 0. ipify.org (IP pública)
+        if (lower == "mi ip" || lower == "cuál es mi ip" || lower == "cual es mi ip" || lower == "ip pública") {
+            val reply = ExternalIntegrationsHelper.fetchIpifyPublicIp()
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.IPIFY, emptyList())))
+        }
+
+        // 0. Advice Slip (Consejo)
+        if (lower.contains("dame un consejo") || lower == "un consejo" || lower == "consejo") {
+            val reply = ExternalIntegrationsHelper.fetchAdviceSlip()
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.ADVICE_SLIP, emptyList())))
+        }
+
+        // 0. Open Trivia Database
+        if (lower.contains("trivia") || lower.contains("pregunta de trivia")) {
+            val reply = ExternalIntegrationsHelper.fetchOpenTrivia()
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.TRIVIA, emptyList())))
+        }
+
+        // 0. NASA APOD
+        if (lower.contains("nasa") || lower.contains("foto del día") || lower.contains("imagen del día")) {
+            val reply = ExternalIntegrationsHelper.fetchNasaApod(settings.nasaApiKey)
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.NASA_APOD, emptyList())))
+        }
+
+        // 0. CoinGecko (Crypto)
+        if (lower.contains("bitcoin") || lower.contains("ethereum") || lower.contains("crypto") || lower.contains("criptomonedas")) {
+            val crypto = when {
+                lower.contains("ethereum") -> "ethereum"
+                lower.contains("solana") -> "solana"
+                else -> "bitcoin"
+            }
+            val reply = ExternalIntegrationsHelper.fetchCoinGeckoCrypto(crypto)
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.COINGECKO, listOf(crypto))))
+        }
+
+        // 0. USGS Earthquake
+        if (lower.contains("sismo") || lower.contains("terremoto") || lower.contains("temblor")) {
+            val reply = ExternalIntegrationsHelper.fetchUsgsEarthquakes()
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.USGS_EARTHQUAKE, emptyList())))
+        }
+
+        // 0. Sunrise/Sunset
+        if (lower.contains("salida del sol") || lower.contains("puesta del sol") || lower.contains("sale el sol")) {
+            val reply = ExternalIntegrationsHelper.fetchSunriseSunset()
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.SUNRISE_SUNSET, emptyList())))
+        }
+
+        // 0. Calidad del Aire
+        if (lower.contains("calidad del aire") || lower.contains("contaminacion") || lower.contains("aqi")) {
+            val reply = ExternalIntegrationsHelper.fetchAirQuality()
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.AIR_QUALITY, emptyList())))
+        }
+
+        // 0. Nager.Date (Feriados)
+        if (lower.contains("feriado") || lower.contains("días festivos") || lower.contains("dias festivos")) {
+            val reply = ExternalIntegrationsHelper.fetchNagerHolidays("CU")
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.NAGER_DATE, listOf("CU"))))
+        }
+
+        // 0. REST Countries
+        val countryMatch = Regex("""^(?:info|informacion|capital|pais|país)\s+de\s+(.+)$""", RegexOption.IGNORE_CASE).find(trimmed)
+        if (countryMatch != null) {
+            val country = countryMatch.groupValues[1].trim()
+            val reply = ExternalIntegrationsHelper.fetchRestCountry(country)
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.REST_COUNTRIES, listOf(country))))
+        }
+
+        // 0. Numbers API
+        val numberMatch = Regex("""^(?:dato|curiosidad)\s+(?:del?|sobre)?\s*número\s*(\d+)$""", RegexOption.IGNORE_CASE).find(trimmed)
+        if (numberMatch != null) {
+            val num = numberMatch.groupValues[1]
+            val reply = ExternalIntegrationsHelper.fetchNumbersApi(num)
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.NUMBERS_API, listOf(num))))
+        }
+
+        // 0. Generación de Imagen gratis (Pollinations.ai)
+        val imageMatch = Regex("""^(?:dibújame|dibujame|dibuja|hazme\s+una\s+imagen\s+de|genera\s+una\s+imagen\s+de|crea\s+una\s+imagen\s+de)\s+(.+)$""", RegexOption.IGNORE_CASE).find(trimmed)
+        if (imageMatch != null) {
+            val prompt = imageMatch.groupValues[1].trim()
+            val (text, file) = ExternalIntegrationsHelper.generatePollinationsImage(context, prompt)
+            return LocalCommandResult.Handled(text, listOf(AiAction(AiActionType.GENERAR_IMAGEN, listOf(prompt))))
+        }
+
+        // 0. Cuba: El Toque (Tasa de cambio)
+        if (lower.contains("el toque") || lower.contains("tasa de cambio") || (lower.contains("dolar") && lower.contains("cuanto")) || (lower.contains("dólar") && lower.contains("cuanto")) || lower == "dolar" || lower == "dólar" || lower == "mlc") {
+            val reply = ExternalIntegrationsHelper.fetchElToqueRates()
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.EL_TOQUE, emptyList())))
+        }
+
+        // 0. Cuba: ETECSA USSD Saldo / Megas / Bonos
+        if (lower.contains("saldo") || lower.contains("cuanto me queda") || lower.contains("cuántos megas") || lower.contains("cuantos megas") || lower.contains("*222#") || lower.contains("*222*328#")) {
+            val code = when {
+                lower.contains("megas") || lower.contains("datos") || lower.contains("internet") -> "*222*328#"
+                lower.contains("bono") -> "*222*266#"
+                lower.contains("sms") -> "*222*767#"
+                lower.contains("minuto") || lower.contains("voz") -> "*222*869#"
+                else -> "*222#"
+            }
+            val reply = ExternalIntegrationsHelper.executeEtecsaUssd(context, code)
+            return LocalCommandResult.Handled(reply, listOf(AiAction(AiActionType.ETECSA_USSD, listOf(code))))
+        }
+
         // 1. Alarmas
         val alarmMatch = Regex("""^(?:pon|pone|poner|crea|crear|programa|programar)?\s*(?:una\s+)?alarma\s*(?:para\s+las?|a\s+las?|las?)?\s*(\d{1,2})(?::(\d{2}))?\s*(?:am|pm)?$""", RegexOption.IGNORE_CASE).find(trimmed)
             ?: Regex("""^alarma\s*(?:a\s+las?|para\s+las?)?\s*(\d{1,2})(?::(\d{2}))?$""", RegexOption.IGNORE_CASE).find(trimmed)

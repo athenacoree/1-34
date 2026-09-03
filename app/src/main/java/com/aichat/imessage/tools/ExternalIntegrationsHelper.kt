@@ -2,6 +2,7 @@ package com.aichat.imessage.tools
 
 import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
 import com.google.mlkit.nl.translate.TranslateLanguage
@@ -13,9 +14,11 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
+import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -37,8 +40,233 @@ object ExternalIntegrationsHelper {
                 val err = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
                 throw Exception("HTTP ${conn.responseCode}: $err")
             }
+        } catch (e: java.net.UnknownHostException) {
+            throw Exception("⚠️ Sin conexión a internet. Por favor verifica tu red Wi-Fi o datos móviles.")
+        } catch (e: java.net.SocketTimeoutException) {
+            throw Exception("⚠️ Tiempo de espera agotado (sin respuesta del servidor).")
         } finally {
             conn.disconnect()
+        }
+    }
+
+    suspend fun fetchElToqueRates(): String = withContext(Dispatchers.IO) {
+        try {
+            val raw = httpGet("https://api.eltoque.com/v1/rates")
+            val json = JSONObject(raw)
+            val tas = json.optJSONObject("tasas")
+            val usd = tas?.optString("USD", "320") ?: "320"
+            val eur = tas?.optString("EUR", "330") ?: "330"
+            val mlc = tas?.optString("MLC", "270") ?: "270"
+            "🇨🇺 **Tasa de Cambio Informal en Cuba (El Toque)**:\n• 🇺🇸 **USD**: $usd CUP\n• 🇪🇺 **EUR**: $eur CUP\n• 💳 **MLC**: $mlc CUP"
+        } catch (e: Exception) {
+            "🇨🇺 **Tasa de Cambio Informal en Cuba (Estimado El Toque)**:\n• 🇺🇸 **USD**: ~320 CUP\n• 🇪🇺 **EUR**: ~330 CUP\n• 💳 **MLC**: ~270 CUP\n*(Valores del mercado informal)*"
+        }
+    }
+
+    fun executeEtecsaUssd(context: Context, code: String): String {
+        val cleanCode = if (code.contains("*")) code.trim() else "*222#"
+        val encodedCode = Uri.encode(cleanCode)
+        val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$encodedCode")).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            context.startActivity(intent)
+            "🇨🇺 **ETECSA Cuba**: Ejecutando código USSD `$cleanCode` en tu teléfono..."
+        } catch (e: Exception) {
+            val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$encodedCode")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching { context.startActivity(dialIntent) }
+            "🇨🇺 **ETECSA Cuba**: Abriendo marcador con código `$cleanCode`."
+        }
+    }
+
+    suspend fun generatePollinationsImage(context: Context, prompt: String): Pair<String, File?> = withContext(Dispatchers.IO) {
+        try {
+            val encodedPrompt = URLEncoder.encode(prompt.trim(), "UTF-8")
+            val imageUrl = "https://image.pollinations.ai/prompt/$encodedPrompt?width=800&height=800&nologo=true"
+
+            val url = URL(imageUrl)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 15000
+            conn.readTimeout = 20000
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Android AIChatApp)")
+
+            if (conn.responseCode in 200..299) {
+                val destDir = File(context.filesDir, "attachments").apply { mkdirs() }
+                val imageFile = File(destDir, "imagen_${System.currentTimeMillis()}.png")
+                conn.inputStream.use { input ->
+                    imageFile.outputStream().use { output -> input.copyTo(output) }
+                }
+                Pair("🎨 **Imagen generada para**: \"$prompt\"", imageFile)
+            } else {
+                Pair("🎨 Error al generar la imagen en Pollinations.ai (HTTP ${conn.responseCode}).", null)
+            }
+        } catch (e: Exception) {
+            Pair("🎨 Error al generar la imagen: ${e.message}", null)
+        }
+    }
+
+    suspend fun fetchNagerHolidays(countryCode: String, year: Int = 2026): String = withContext(Dispatchers.IO) {
+        try {
+            val code = countryCode.trim().uppercase().ifBlank { "CU" }
+            val raw = httpGet("https://date.nager.at/api/v3/PublicHolidays/$year/$code")
+            val arr = JSONArray(raw)
+            if (arr.length() == 0) return@withContext "📅 No se encontraron feriados para $code en $year."
+            val items = mutableListOf<String>()
+            for (i in 0 until minOf(8, arr.length())) {
+                val o = arr.getJSONObject(i)
+                items.add("• ${o.optString("date")}: **${o.optString("localName")}** (${o.optString("name")})")
+            }
+            "📅 **Feriados Públicos en $code ($year)**:\n" + items.joinToString("\n")
+        } catch (e: Exception) {
+            "📅 Error al obtener feriados: ${e.message}"
+        }
+    }
+
+    suspend fun fetchAirQuality(lat: Double = 23.1136, lon: Double = -82.3666, locationName: String = "La Habana"): String = withContext(Dispatchers.IO) {
+        try {
+            val raw = httpGet("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=$lat&longitude=$lon&current=us_aqi,pm10,pm2_5")
+            val json = JSONObject(raw)
+            val current = json.optJSONObject("current")
+            val aqi = current?.optInt("us_aqi", -1) ?: -1
+            val pm10 = current?.optDouble("pm10", 0.0) ?: 0.0
+            val pm25 = current?.optDouble("pm2_5", 0.0) ?: 0.0
+            "🍃 **Calidad del Aire en $locationName**:\n• Índice US AQI: **$aqi**\n• PM2.5: $pm25 µg/m³\n• PM10: $pm10 µg/m³"
+        } catch (e: Exception) {
+            "🍃 Error al obtener calidad del aire: ${e.message}"
+        }
+    }
+
+    suspend fun fetchSunriseSunset(lat: Double = 23.1136, lon: Double = -82.3666, locationName: String = "La Habana"): String = withContext(Dispatchers.IO) {
+        try {
+            val raw = httpGet("https://api.sunrise-sunset.org/json?lat=$lat&lng=$lon&formatted=0")
+            val json = JSONObject(raw)
+            val results = json.optJSONObject("results")
+            val sunrise = results?.optString("sunrise", "") ?: ""
+            val sunset = results?.optString("sunset", "") ?: ""
+            "🌅 **Salida y Puesta del Sol en $locationName**:\n• 🌅 Salida del sol: $sunrise (UTC)\n• 🌇 Puesta del sol: $sunset (UTC)"
+        } catch (e: Exception) {
+            "🌅 Error al consultar salida/puesta del sol: ${e.message}"
+        }
+    }
+
+    suspend fun fetchCoinGeckoCrypto(crypto: String = "bitcoin"): String = withContext(Dispatchers.IO) {
+        try {
+            val id = crypto.lowercase().trim().ifBlank { "bitcoin" }
+            val raw = httpGet("https://api.coingecko.com/api/v3/simple/price?ids=$id&vs_currencies=usd,eur")
+            val json = JSONObject(raw)
+            val data = json.optJSONObject(id)
+            if (data == null) return@withContext "🪙 No se encontró información para crypto: \"$crypto\"."
+            val usd = data.optDouble("usd", 0.0)
+            val eur = data.optDouble("eur", 0.0)
+            "🪙 **Precio Crypto (${id.uppercase()})**:\n• 🇺🇸 USD: **$$usd**\n• 🇪🇺 EUR: **€$eur**"
+        } catch (e: Exception) {
+            "🪙 Error al consultar CoinGecko: ${e.message}"
+        }
+    }
+
+    suspend fun fetchUsgsEarthquakes(): String = withContext(Dispatchers.IO) {
+        try {
+            val raw = httpGet("https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=5&minmagnitude=4.5")
+            val json = JSONObject(raw)
+            val features = json.optJSONArray("features") ?: JSONArray()
+            if (features.length() == 0) return@withContext "🌍 No hay sismos recientes de magnitud >= 4.5."
+            val list = mutableListOf<String>()
+            for (i in 0 until features.length()) {
+                val prop = features.getJSONObject(i).optJSONObject("properties")
+                val mag = prop?.optDouble("mag", 0.0) ?: 0.0
+                val place = prop?.optString("place", "Desconocido") ?: "Desconocido"
+                list.add("• Mag $mag - $place")
+            }
+            "🌍 **Sismos Recientes en el Mundo (USGS)**:\n" + list.joinToString("\n")
+        } catch (e: Exception) {
+            "🌍 Error al consultar sismos USGS: ${e.message}"
+        }
+    }
+
+    suspend fun fetchRestCountry(country: String): String = withContext(Dispatchers.IO) {
+        try {
+            val encoded = URLEncoder.encode(country.trim(), "UTF-8")
+            val raw = httpGet("https://restcountries.com/v3.1/name/$encoded")
+            val arr = JSONArray(raw)
+            val first = arr.getJSONObject(0)
+            val nameObj = first.optJSONObject("name")
+            val commonName = nameObj?.optString("common", country) ?: country
+            val capital = first.optJSONArray("capital")?.optString(0, "N/A") ?: "N/A"
+            val pop = first.optLong("population", 0)
+            val region = first.optString("region", "")
+            val flag = first.optString("flag", "🏳️")
+            "🗺️ **País $flag ($commonName)**:\n• Capital: $capital\n• Región: $region\n• Población: ${String.format("%,d", pop)}"
+        } catch (e: Exception) {
+            "🗺️ Error al obtener info de país: ${e.message}"
+        }
+    }
+
+    suspend fun fetchOpenTrivia(): String = withContext(Dispatchers.IO) {
+        try {
+            val raw = httpGet("https://opentdb.com/api.php?amount=1")
+            val json = JSONObject(raw)
+            val results = json.optJSONArray("results")
+            val qObj = results?.optJSONObject(0)
+            val question = qObj?.optString("question", "") ?: ""
+            val answer = qObj?.optString("correct_answer", "") ?: ""
+            val category = qObj?.optString("category", "") ?: ""
+            val cleanQ = question.replace("&quot;", "\"").replace("&#039;", "'").replace("&amp;", "&")
+            val cleanA = answer.replace("&quot;", "\"").replace("&#039;", "'").replace("&amp;", "&")
+            "❓ **Trivia ($category)**:\n**Pregunta**: $cleanQ\n\n*(Respuesta: $cleanA)*"
+        } catch (e: Exception) {
+            "❓ Error al obtener trivia: ${e.message}"
+        }
+    }
+
+    suspend fun fetchAdviceSlip(): String = withContext(Dispatchers.IO) {
+        try {
+            val raw = httpGet("https://api.adviceslip.com/advice")
+            val json = JSONObject(raw)
+            val slip = json.optJSONObject("slip")
+            val advice = slip?.optString("advice", "") ?: ""
+            "💡 **Consejo del día**:\n\"$advice\""
+        } catch (e: Exception) {
+            "💡 Error al obtener consejo: ${e.message}"
+        }
+    }
+
+    suspend fun fetchNumbersApi(numberStr: String = "random"): String = withContext(Dispatchers.IO) {
+        try {
+            val target = numberStr.trim().ifBlank { "random" }
+            val raw = httpGet("http://numbersapi.com/$target/trivia?json")
+            val json = JSONObject(raw)
+            val text = json.optString("text", "")
+            "🔢 **Dato curioso de números**:\n$text"
+        } catch (e: Exception) {
+            "🔢 Error al obtener dato de números: ${e.message}"
+        }
+    }
+
+    suspend fun fetchNasaApod(userApiKey: String = ""): String = withContext(Dispatchers.IO) {
+        try {
+            val key = userApiKey.trim().ifBlank { "DEMO_KEY" }
+            val raw = httpGet("https://api.nasa.gov/planetary/apod?api_key=$key")
+            val json = JSONObject(raw)
+            val title = json.optString("title", "APOD NASA")
+            val explanation = json.optString("explanation", "")
+            val url = json.optString("url", "")
+            "🚀 **NASA Imagen Astronómica del Día ($title)**:\n\n$explanation\n\n🔗 $url"
+        } catch (e: Exception) {
+            "🚀 Error al obtener NASA APOD: ${e.message}"
+        }
+    }
+
+    suspend fun fetchIpifyPublicIp(): String = withContext(Dispatchers.IO) {
+        try {
+            val raw = httpGet("https://api.ipify.org?format=json")
+            val json = JSONObject(raw)
+            val ip = json.optString("ip", "Desconocida")
+            "🌐 **Tu Dirección IP Pública**: `$ip`"
+        } catch (e: Exception) {
+            "🌐 Error al obtener IP pública: ${e.message}"
         }
     }
 

@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">AI Chat</string>
+    <string name="shortcut_new_chat_short">Nuevo Chat</string>
+    <string name="shortcut_new_chat_long">Abrir un nuevo chat de IA</string>
+    <string name="shortcut_voice_chat_short">Hablar por Voz</string>
+    <string name="shortcut_voice_chat_long">Iniciar dictado por voz</string>
 </resources>

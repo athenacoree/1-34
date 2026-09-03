@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_chat"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_new_chat_short"
+        android:shortcutLongLabel="@string/shortcut_new_chat_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.aichat.imessage"
+            android:targetClass="com.aichat.imessage.MainActivity">
+            <extra android:name="action" android:value="new_chat" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="voice_chat"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_voice_chat_short"
+        android:shortcutLongLabel="@string/shortcut_voice_chat_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.aichat.imessage"
+            android:targetClass="com.aichat.imessage.MainActivity">
+            <extra android:name="action" android:value="voice_chat" />
+        </intent>
+    </shortcut>
+</shortcuts>

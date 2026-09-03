@@ -50,7 +50,21 @@ enum class AiActionType {
     MLKIT_TRANSLATE,
     MLKIT_OCR,
     MLKIT_BARCODE,
-    BUSCAR_FOTOS
+    BUSCAR_FOTOS,
+    EL_TOQUE,
+    ETECSA_USSD,
+    GENERAR_IMAGEN,
+    NAGER_DATE,
+    AIR_QUALITY,
+    SUNRISE_SUNSET,
+    COINGECKO,
+    USGS_EARTHQUAKE,
+    REST_COUNTRIES,
+    TRIVIA,
+    ADVICE_SLIP,
+    NUMBERS_API,
+    NASA_APOD,
+    IPIFY
 }
 
 data class AiAction(val type: AiActionType, val args: List<String>)
